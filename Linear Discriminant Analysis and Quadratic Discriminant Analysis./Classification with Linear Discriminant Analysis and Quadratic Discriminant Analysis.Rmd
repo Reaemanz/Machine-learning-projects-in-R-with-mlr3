@@ -1,0 +1,137 @@
+---
+title: "Linear and Quadratic Discriminant Analysis Model"
+author: "Nsubuga Emmanuel Reagan"
+date: "`r Sys.Date()`"
+output: html_document
+toc: true
+toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+#ANALYSING THE WINE DATASET USING "LDA" AND "QDA"
+
+<!--# loading packages -->
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(mlr)
+library(tidyverse)
+```
+
+<!--# loading and exploring the wine dataset -->
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(HDclassif)
+data(wine, package = "HDclassif")
+wineTib <- as_tibble(wine)
+```
+
+<!--# Cleaning the dataset -->
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+names(wineTib) <- c("Class", "Alco", "Malic", "Ash", "Alk", "Mag", "Phe", "Flav", "Non_flav", "Proan", "Col", "Hue",
+"OD", "Prol")
+
+wineTib$Class <- as.factor(wineTib$Class)
+```
+
+From the dataset, we have 13 continuous measurements made on 178 bottles of wine, where each measurement is the amount of a different compound/element in the wine. We also have a single categorical variable, Class, which tells us which vineyard the bottle comes from.
+
+We the n plot the data to see how the compounds vary between vineyards. The resulting plot is shown below:
+
+<!--# Creating untidy tibble for plotting -->
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+wineUntidy <- gather(wineTib, "Variable", "Value", -Class)
+ggplot(wineUntidy, aes(Class, Value)) +
+facet_wrap(~ Variable, scales = "free_y") +
+geom_boxplot() +
+theme_bw()
+```
+
+Figure 1.0 Box and whiskers plots of each continuous variable in the data against vineyard number. For the box and whiskers, the thick horizontal line represents the median, the box represents the interquartile range (IQR), the whiskers represent the Tukey range (1.5 times the IQR above and below the quartiles), and the dots represent data outside of the Tukey range. The classes look very separable.
+
+Creating the task and learner and training the model.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+wineTask <- makeClassifTask(data = wineTib, target = "Class")
+lda <- makeLearner("classif.lda")
+ldaModel <- train(lda, wineTask)
+```
+
+We extract the model information using the getLearnerModel() function, and get DF values for each case using the predict() function. By printing head(ldaPreds), we can see that the model has learned two DFs, LD1 and LD2, and that the predict() function has indeed returned the values for these functions for each case in our wineTib dataset.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ldaModelData <- getLearnerModel(ldaModel)
+ldaPreds <- predict(ldaModelData)$x
+head(ldaPreds)
+
+```
+
+We plot the two DFs against each other to visualise how well they separate the bottles of wine from the three vineyards. The resulting plot is shown in the figure below:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+wineTib %>%
+mutate(LD1 = ldaPreds[, 1],
+LD2 = ldaPreds[, 2]) %>%
+ggplot(aes(LD1, LD2, col = Class)) +
+geom_point() +
+stat_ellipse() +
+theme_bw()
+```
+
+Plotting the DFs against each other. The values for LD1 and LD2 for each case are plotted against each other, shaded by their class. The LDA has reduced our 13 predictor variables into just two DFs that do an excellent job of separating the wines from each of the vineyards.
+
+#Cross-validating the LDA and QDA models.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+qda <- makeLearner("classif.qda")
+qdaModel <- train(qda, wineTask)
+
+kFold <- makeResampleDesc(method = "RepCV", folds = 10, reps = 50,
+stratify = TRUE)
+ldaCV <- resample(learner = lda, task = wineTask, resampling = kFold,
+measures = list(mmce, acc))
+qdaCV <- resample(learner = qda, task = wineTask, resampling = kFold,
+measures = list(mmce, acc))
+ldaCV$aggr
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+qdaCV$aggr
+```
+
+Our LDA model correctly classified 98.8% of wine bottles on average. There isn't much room for improvement here, but our QDA model managed to correctly classify 99.2% of cases!
+
+Confusion matrix for LDA
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+calculateConfusionMatrix(ldaCV$pred, relative = TRUE)
+```
+
+Our LDA model misclassifies more cases from vineyard 2 as from vineyard 3 than as from vineyard 1.
+
+QDA confusion matrix
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+calculateConfusionMatrix(qdaCV$pred, relative = TRUE)
+```
+
+Our QDA model is better at identifying wines from vineyard 3. It misclassified 12 as from vineyard 2, whereas the LDA model misclassified 23.
+
+Using the model to make predictions on new data.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+poisoned <- tibble(Alco = 13, Malic = 2, Ash = 2.2, Alk = 19, Mag = 100,
+Phe = 2.3, Flav = 2.5, Non_flav = 0.35, Proan = 1.7,
+Col = 4, Hue = 1.1, OD = 3, Prol = 750)
+predict(qdaModel, newdata = poisoned)
+```
+
+The model predicts that the poisoned bottle came from vineyard 1
